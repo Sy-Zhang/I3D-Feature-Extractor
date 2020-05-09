@@ -9,6 +9,7 @@ import os
 import time
 import numpy as np
 from PIL import Image
+import av
 
 #
 import tensorflow as tf
@@ -27,19 +28,30 @@ _CHECKPOINT_PATHS = {
 
 def feature_extractor():
     # loading net
-    net = i3d.InceptionI3d(400, spatial_squeeze=True, final_endpoint='Logits')
+    with tf.variable_scope('RGB'):
+        net = i3d.InceptionI3d(400, spatial_squeeze=True, final_endpoint='Logits')
     rgb_input = tf.placeholder(tf.float32, shape=(batch_size, _SAMPLE_VIDEO_FRAMES, _IMAGE_SIZE, _IMAGE_SIZE, 3))
     
     _, end_points = net(rgb_input, is_training=False, dropout_keep_prob=1.0)
     end_feature = end_points['avg_pool3d']
     sess = tf.Session()
 
+
+    # rgb_input = tf.placeholder(tf.float32, shape=(1, _SAMPLE_VIDEO_FRAMES, _IMAGE_SIZE, _IMAGE_SIZE, 3))
+    # with tf.variable_scope('RGB'):
+    #   rgb_model = i3d.InceptionI3d(
+    #       400, spatial_squeeze=True, final_endpoint='Logits')
+    #   rgb_logits, _ = rgb_model(
+    #       rgb_input, is_training=False, dropout_keep_prob=1.0)
+
     rgb_variable_map = {}
     for variable in tf.global_variables():
-        rgb_variable_map[variable.name.replace(':0', '')[len('inception_i3d/'):]] = variable
-    saver = tf.train.Saver(var_list=rgb_variable_map)
 
-    saver.restore(sess, _CHECKPOINT_PATHS['rgb_imagenet'])
+      if variable.name.split('/')[0] == 'RGB':
+          rgb_variable_map[variable.name.replace(':0', '')] = variable
+    rgb_saver = tf.train.Saver(var_list=rgb_variable_map, reshape=True)
+
+    rgb_saver.restore(sess, _CHECKPOINT_PATHS['rgb_imagenet'])
     
     video_list = open(VIDEO_PATH_FILE).readlines()
     video_list = [name.strip() for name in video_list]
@@ -51,6 +63,7 @@ def feature_extractor():
     
     for cnt, video_name in enumerate(video_list):
         video_path = os.path.join(VIDEO_DIR, video_name)
+        # video_path = os.path.join(VIDEO_DIR, video_name+'.avi')
         feat_path = os.path.join(OUTPUT_FEAT_DIR, video_name + '.npy')
 
         if os.path.exists(feat_path):
@@ -74,6 +87,8 @@ def feature_extractor():
             input_blobs = []
             for j in range(batch_size):
                 input_blob = []
+
+                # Image Backend
                 for k in range(L):
                     idx = i*batch_size*L + j*L + k
                     idx = int(idx)
@@ -89,9 +104,12 @@ def feature_extractor():
                     image[:, :, :] -= 127.5
                     image[:, :, :] /= 127.5
                     input_blob.append(image)
-                
+
+                # video Backend
+
                 input_blob = np.array(input_blob, dtype='float32')
-                
+
+
                 input_blobs.append(input_blob)
 
             input_blobs = np.array(input_blobs, dtype='float32')
@@ -102,7 +120,7 @@ def feature_extractor():
             features.append(clip_feature)
 
         features = np.concatenate(features, axis=0)
-        features = features[:n_feat:2]   # 16 frames per feature  (since 64-frame snippet corresponds to 8 features in I3D)
+        # features = features[:n_feat:2]   # 16 frames per feature  (since 64-frame snippet corresponds to 8 features in I3D)
 
         feat_path = os.path.join(OUTPUT_FEAT_DIR, video_name + '.npy')
 
@@ -118,7 +136,7 @@ if __name__ == "__main__":
     print('******--------- Extract I3D features ------*******')
     parser.add_argument('-g', '--GPU', type=int, default=0, help='GPU id')
     parser.add_argument('-of', '--OUTPUT_FEAT_DIR', dest='OUTPUT_FEAT_DIR', type=str,
-                        default='./dataset/Charades/features/i3d/feats_i3d_rgb_npy/',
+                        default='./dadtaset/Charades/features/i3d/feats_i3d_rgb_npy/',
                         help='Output feature path')
     parser.add_argument('-vpf', '--VIDEO_PATH_FILE', type=str,
                         default='charades_sta_videos.txt',
@@ -138,7 +156,7 @@ if __name__ == "__main__":
     resize_w = 224
     resize_h = 224
     L = 64
-    batch_size = 1
+    batch_size = 16
 
     # set gpu id
     os.environ['CUDA_VISIBLE_DEVICES'] = str(RUN_GPU)

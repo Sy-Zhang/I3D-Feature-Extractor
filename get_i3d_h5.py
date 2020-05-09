@@ -3,7 +3,7 @@ import h5py
 import numpy as np
 import json
 
-feat_npy_root = 'feats_i3d_rgb_npy/'   # need to be replaced
+feat_npy_root = 'output/'   # need to be replaced
 feat_files = os.listdir(feat_npy_root)
 feat_files = [item for item in feat_files if item.endswith('.npy')]
 
@@ -28,14 +28,14 @@ print('Processed %d files.'%count)
 
 print('Writing file ...')
 
-fid = h5py.File('charades_i3d_rgb_stride_1s.hdf5', 'w')
+fid = h5py.File('tacos_i3d_rgb_stride_1s.hdf5', 'w')
 
 for vid in feat_dict.keys():
     if vid in fid:
         print('WARNING: group name exists.')
         continue
 
-    fid.create_group(vid).create_dataset('i3d_rgb_features', data=feat_dict[vid])
+    fid.create_dataset(vid, data=feat_dict[vid])
 
 print('Done.')
 
