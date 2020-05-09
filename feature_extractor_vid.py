@@ -9,14 +9,16 @@ import os
 import time
 import numpy as np
 from PIL import Image
-import av
 
-#
+import torch
+import torchvision
+import transforms as T
+
 import tensorflow as tf
 
 import i3d
 
-_SAMPLE_VIDEO_FRAMES = 64
+_SAMPLE_VIDEO_FRAMES = 1024
 _IMAGE_SIZE = 224
 _CHECKPOINT_PATHS = {
     'rgb': 'data/checkpoints/rgb_scratch/model.ckpt',
@@ -36,6 +38,12 @@ def feature_extractor():
     end_feature = end_points['avg_pool3d']
     sess = tf.Session()
 
+    transform = torchvision.transforms.Compose([
+        T.ToFloatTensorInZeroOne(),
+        T.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
+        T.Resize((224, 224)),
+        T.CenterCrop((224, 224))
+    ])
 
     # rgb_input = tf.placeholder(tf.float32, shape=(1, _SAMPLE_VIDEO_FRAMES, _IMAGE_SIZE, _IMAGE_SIZE, 3))
     # with tf.variable_scope('RGB'):
@@ -60,10 +68,10 @@ def feature_extractor():
         os.mkdir(OUTPUT_FEAT_DIR)
 
     print('Total number of videos: %d'%len(video_list))
-    
+
     for cnt, video_name in enumerate(video_list):
-        video_path = os.path.join(VIDEO_DIR, video_name)
-        # video_path = os.path.join(VIDEO_DIR, video_name+'.avi')
+        # video_path = os.path.join(VIDEO_DIR, video_name)
+        video_path = os.path.join(VIDEO_DIR, video_name+'.avi')
         feat_path = os.path.join(OUTPUT_FEAT_DIR, video_name + '.npy')
 
         if os.path.exists(feat_path):
@@ -71,42 +79,47 @@ def feature_extractor():
             continue
 
         print('video_path', video_path)
-        
-        n_frame = len([ff for ff in os.listdir(video_path) if ff.endswith('.jpg')])
-        
+
+        vframes, _, info = torchvision.io.read_video(video_path, start_pts=0, end_pts=None, pts_unit='sec')
+        vframes = T.frame_temporal_sampling(vframes,start_idx=0,end_idx=None,num_samples=int(round(len(vframes)/info['video_fps']*24)))
+        vframes = transform(vframes).permute(1, 2, 3, 0).numpy()
+        n_frame = vframes.shape[0]
+
         print('Total frames: %d'%n_frame)
-        
+
         features = []
 
         n_feat = int(n_frame // 8)
-        n_batch = n_feat // batch_size // (L//8) + 1
+        n_batch = n_feat // batch_size + 1
         print('n_frame: %d; n_feat: %d'%(n_frame, n_feat))
         print('n_batch: %d'%n_batch)
 
         for i in range(n_batch):
             input_blobs = []
             for j in range(batch_size):
-                input_blob = []
+                start_idx = i*batch_size*L + j*L if i==0 else i*batch_size*L + j*L - 8
+                end_idx = min(n_frame, start_idx+L)
+                input_blob = vframes[start_idx:end_idx].reshape(-1, resize_w, resize_h, 3)
 
-                # Image Backend
-                for k in range(L):
-                    idx = i*batch_size*L + j*L + k
-                    idx = int(idx)
-                    idx = idx%n_frame + 1
-                    image = Image.open(os.path.join(video_path, '%d.jpg'%idx))
-                    image = image.resize((resize_w, resize_h))
-                    image = np.array(image, dtype='float32')
-                    '''
-                    image[:, :, 0] -= 104.
-                    image[:, :, 1] -= 117.
-                    image[:, :, 2] -= 123.
-                    '''
-                    image[:, :, :] -= 127.5
-                    image[:, :, :] /= 127.5
-                    input_blob.append(image)
-
-                input_blob = np.array(input_blob, dtype='float32')
-
+                # input_blob = []
+                # for k in range(L):
+                #     idx = i*batch_size*L + j*L + k
+                #     idx = int(idx)
+                #     idx = idx%n_frame + 1
+                #     frame = vframes[idx-1]
+                #     # image = Image.open(os.path.join('/data/home2/hacker01/Share/Data/TACoS/images_256p/{}'.format(video_name), '%d.jpg'%idx))
+                #     # image = image.resize((resize_w, resize_h))
+                #     # image = np.array(image, dtype='float32')
+                #     '''
+                #     image[:, :, 0] -= 104.
+                #     image[:, :, 1] -= 117.
+                #     image[:, :, 2] -= 123.
+                #     '''
+                #     # image[:, :, :] -= 127.5
+                #     # image[:, :, :] /= 127.5
+                #     input_blob.append(frame)
+                #
+                # input_blob = np.array(input_blob, dtype='float32')
 
                 input_blobs.append(input_blob)
 
@@ -153,7 +166,7 @@ if __name__ == "__main__":
 
     resize_w = 224
     resize_h = 224
-    L = 64
+    L = 1024
     batch_size = 1
 
     # set gpu id
